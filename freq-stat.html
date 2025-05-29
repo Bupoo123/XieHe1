@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>微生物频次分析工具</title>
+    <!-- 引入XLSX库用于解析Excel文件 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <!-- 引入ECharts库用于绘图 -->
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        .control-panel {
+            margin-bottom: 20px;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+        }
+        .chart-container {
+            width: 100%;
+            height: 600px;
+            margin-top: 20px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #f4f4f4;
+        }
+        tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+        .select-container {
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>微生物频次分析工具</h1>
+        
+        <div class="control-panel">
+            <input type="file" id="fileInput" accept=".xlsx,.xls" />
+            <div class="select-container">
+                <label for="countColumn">选择判断依据列：</label>
+                <select id="countColumn">
+                    <option value="SDSAR_local">SDSAR_local</option>
+                    <option value="SDSAR_JY">SDSAR_JY</option>
+                </select>
+            </div>
+        </div>
+
+        <div id="chartContainer" class="chart-container"></div>
+        
+        <div id="tableContainer">
+            <h2>详细数据</h2>
+            <table id="resultTable">
+                <thead>
+                    <tr>
+                        <th>微生物种类</th>
+                        <th>出现频次</th>
+                        <th>出现比例</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        let myChart = null;
+
+        // 初始化ECharts图表
+        function initChart() {
+            myChart = echarts.init(document.getElementById('chartContainer'));
+        }
+
+        // 处理文件上传
+        document.getElementById('fileInput').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            const reader = new FileReader();
+
+            reader.onload = function(e) {
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, {type: 'array'});
+                const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                const jsonData = XLSX.utils.sheet_to_json(firstSheet);
+                
+                analyzeData(jsonData);
+            };
+
+            reader.readAsArrayBuffer(file);
+        });
+
+        // 分析数据并更新图表
+        function analyzeData(data) {
+            const countColumn = document.getElementById('countColumn').value;
+            const samples = new Set(data.map(row => row.Sample));
+            const totalSamples = samples.size;
+            
+            // 统计每个微生物的出现频次
+            const microbeStats = {};
+            data.forEach(row => {
+                const species = row.Species;
+                const value = row[countColumn];
+                
+                if (!microbeStats[species]) {
+                    microbeStats[species] = new Set();
+                }
+                
+                if (value && value !== 'NA' && value !== 0) {
+                    microbeStats[species].add(row.Sample);
+                }
+            });
+
+            // 转换统计结果
+            const results = Object.entries(microbeStats).map(([species, samples]) => ({
+                species: species,
+                count: samples.size,
+                percentage: (samples.size / totalSamples * 100).toFixed(2)
+            }));
+
+            // 按频次排序
+            results.sort((a, b) => b.count - a.count);
+
+            // 更新图表
+            updateChart(results);
+            // 更新表格
+            updateTable(results);
+        }
+
+        // 更新图表
+        function updateChart(data) {
+            if (!myChart) {
+                initChart();
+            }
+
+            const option = {
+                title: {
+                    text: '微生物在不同文库中的出现频次分析',
+                    left: 'center'
+                },
+                tooltip: {
+                    trigger: 'axis',
+                    axisPointer: {
+                        type: 'shadow'
+                    }
+                },
+                xAxis: {
+                    type: 'category',
+                    data: data.map(item => item.species),
+                    axisLabel: {
+                        rotate: 45,
+                        interval: 0
+                    }
+                },
+                yAxis: {
+                    type: 'value',
+                    name: '出现频次'
+                },
+                series: [{
+                    name: '出现频次',
+                    type: 'bar',
+                    data: data.map(item => item.count),
+                    label: {
+                        show: true,
+                        position: 'top'
+                    }
+                }],
+                dataZoom: [{
+                    type: 'slider',
+                    show: true,
+                    xAxisIndex: [0],
+                    start: 0,
+                    end: 100
+                }]
+            };
+
+            myChart.setOption(option);
+        }
+
+        // 更新表格
+        function updateTable(data) {
+            const tbody = document.querySelector('#resultTable tbody');
+            tbody.innerHTML = '';
+
+            data.forEach(item => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${item.species}</td>
+                    <td>${item.count}</td>
+                    <td>${item.percentage}%</td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        // 监听窗口大小变化，调整图表大小
+        window.addEventListener('resize', function() {
+            if (myChart) {
+                myChart.resize();
+            }
+        });
+
+        // 初始化图表
+        initChart();
+    </script>
+</body>
+</html>
